@@ -11,7 +11,7 @@ app = Flask(__name__)
 CORS(app)
 
 # ==========================================
-# TELEGRAM SETTINGS (আপনার দেওয়া ডিটেইলস)
+# TELEGRAM SETTINGS
 # ==========================================
 TELEGRAM_TOKEN = "8223149909:AAE8hQlu-coYVlrdd5v810D4HcOmPiZBOP8"
 CHAT_ID = "7188544429"
@@ -67,10 +67,9 @@ def get_market_data(stock):
     return calculate_advanced_indicators(df)
 
 # ==========================================
-# BACKGROUND SCANNER ROBOT (The Real Magic)
+# BACKGROUND SCANNER ROBOT
 # ==========================================
 def background_scanner():
-    # প্রথমে সার্ভার অন হওয়ার একটি টেস্ট মেসেজ পাঠাবে
     send_telegram_alert("✅ System Live: Auto-Scanner is now running in the background!")
     
     while True:
@@ -84,17 +83,14 @@ def background_scanner():
                 atr = round(latest['ATR'], 2)
                 
                 message = ""
-                # Advanced Buy Alert
                 if rsi < 35 and latest['MACD'] > latest['Signal_Line']:
                     target = round(current_price + (atr * 3), 2)
                     stop_loss = round(current_price - (atr * 1.5), 2)
                     message = f"🚀 <b>STRONG BUY ALERT</b>\nStock: {stock}\nPrice: ₹{current_price}\nRSI: {rsi}\nTarget: ₹{target}\nStop Loss: ₹{stop_loss}"
                 
-                # Advanced Sell Alert
                 elif rsi > 75:
                     message = f"⚠️ <b>DANGER / SELL ALERT</b>\nStock: {stock}\nPrice: ₹{current_price}\nMarket Overbought (Greed). Take Profit!"
                 
-                # Spam Protection
                 today = datetime.now().strftime("%Y-%m-%d")
                 alert_key = f"{stock}_{today}_{'BUY' if 'BUY' in message else 'SELL'}"
                 
@@ -103,19 +99,22 @@ def background_scanner():
                     last_alert[alert_key] = True
                     
         except Exception as e:
-            print(f"Scanner Error: {e}")
+            pass
             
-        # প্রতি 15 মিনিট (900 সেকেন্ড) পর পর মার্কেট চেক করবে। 
-        # (টেস্ট করার জন্য আপনি এটি 300 সেকেন্ড বা 5 মিনিটও করতে পারেন)
         time.sleep(900) 
 
-# অ্যাপ চালু হওয়ার সাথে সাথে ব্যাকগ্রাউন্ড রোবটটাকে চালু করে দেওয়া হলো
 threading.Thread(target=background_scanner, daemon=True).start()
 
+# ==========================================
+# UPTIMEROBOT & MAIN ROUTES
+# ==========================================
 
-# ==========================================
-# UI DASHBOARD ROUTE (আপনার Spck Editor-এর জন্য)
-# ==========================================
+# এটি UptimeRobot-কে সিগন্যাল দেবে যে সার্ভার অন আছে
+@app.route('/')
+def home():
+    return "Server is Awake and Running!"
+
+# এটি আপনার Spck Editor / HTML অ্যাপের জন্য ডেটা পাঠাবে
 @app.route('/get_best_trades')
 def get_best_trades():
     trades = []

@@ -3,10 +3,9 @@ from flask_cors import CORS
 import requests
 import pandas as pd
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import threading
 import time
-import pytz
 
 app = Flask(__name__)
 CORS(app)
@@ -14,23 +13,25 @@ CORS(app)
 TELEGRAM_TOKEN = "8223149909:AAE8hQlu-coYVlrdd5v810D4HcOmPiZBOP8"
 CHAT_ID = "7188544429"
 
-# 🔥 Global Markets Included!
+# 🔥 Indian Stocks & Global Assets
 INDIAN_STOCKS = ["RELIANCE.NS", "TATAMOTORS.NS", "HDFCBANK.NS", "TCS.NS", "INFY.NS", "SBIN.NS"]
-GLOBAL_ASSETS = ["GC=F", "SI=F", "CL=F", "INR=X"] # Gold, Silver, Crude Oil, USD/INR
+GLOBAL_ASSETS = ["GC=F", "SI=F", "CL=F", "INR=X"]
 STOCKS = INDIAN_STOCKS + GLOBAL_ASSETS
 
+# ⚡ Global RAM Memory
 active_trades = {stock: None for stock in STOCKS}
 memory_lock = threading.Lock()
 
 def is_market_open(stock):
-    tz = pytz.timezone('Asia/Kolkata')
-    now = datetime.now(tz)
+    # Python er default Timezone use kora holo (No external library needed)
+    ist = timezone(timedelta(hours=5, minutes=30))
+    now = datetime.now(ist)
     
-    # Global Forex/Commodity is open almost 24/5
+    # Global Markets are open 24/5 (Mon-Fri)
     if stock in GLOBAL_ASSETS:
         return now.weekday() < 5
         
-    # Indian Market Check: Mon-Fri, 9:15 AM to 3:30 PM
+    # Indian Market: Mon-Fri, 9:15 AM to 3:30 PM
     if now.weekday() >= 5: return False
     
     market_open = now.replace(hour=9, minute=15, second=0, microsecond=0)
@@ -58,12 +59,14 @@ def calculate_advanced_indicators(df):
     
     df['Support'] = df['low'].rolling(20).min()
     df['Resistance'] = df['high'].rolling(20).max()
+    
     if 'volume' in df and df['volume'].sum() > 0:
         df['Vol_SMA'] = df['volume'].rolling(20).mean()
     else:
-        df['Vol_SMA'] = 1 # Fallback for Forex which doesn't have accurate volume
+        df['Vol_SMA'] = 1 # Fallback
     
-    return df.bfill()
+    # Safe fallback for NaN values
+    return df.fillna(method='bfill').fillna(method='ffill')
 
 def fetch_data(stock, mode="intraday"):
     interval = "1m" if mode == "intraday" else "1d"
@@ -78,10 +81,10 @@ def fetch_data(stock, mode="intraday"):
     return calculate_advanced_indicators(df)
 
 # ==========================================
-# 🔥 SMART BACKGROUND TRACKER
+# 🔥 TELEGRAM BACKGROUND TRACKER
 # ==========================================
 def telegram_tracker():
-    send_telegram("✅ Ultimate AI Engine Live: Indian & Global Markets Tracked!")
+    send_telegram("✅ Ultimate AI Engine Live: Indian & Global Markets Tracked Perfectly!")
     while True:
         try:
             for stock in STOCKS:
@@ -102,35 +105,39 @@ def telegram_tracker():
                         target = round(price + max(latest['ATR'] * 3, price * 0.007), 2)
                         sl = round(price - max(latest['ATR'] * 1.5, price * 0.0035), 2)
                         with memory_lock: active_trades[stock] = {"type": "BUY", "target": target, "sl": sl}
-                        send_telegram(f"🚀 <b>STRONG BUY ALERT</b>\nAsset: {stock}\nEntry: {price}\n🎯 Target: {target}\n🛡️ SL: {sl}")
+                        send_telegram(f"🚀 <b>STRONG BUY ALERT</b>\nAsset: {stock}\nEntry: ₹{price}\n🎯 Target: ₹{target}\n🛡️ SL: ₹{sl}")
                     
                     elif (rsi > 65 and not macd_bullish and vol_breakout) or (price >= latest['Resistance'] * 0.998):
                         target = round(price - max(latest['ATR'] * 3, price * 0.007), 2)
                         sl = round(price + max(latest['ATR'] * 1.5, price * 0.0035), 2)
                         with memory_lock: active_trades[stock] = {"type": "SELL", "target": target, "sl": sl}
-                        send_telegram(f"⚠️ <b>STRONG SELL ALERT</b>\nAsset: {stock}\nEntry: {price}\n🎯 Target: {target}\n🛡️ SL: {sl}")
+                        send_telegram(f"⚠️ <b>STRONG SELL ALERT</b>\nAsset: {stock}\nEntry: ₹{price}\n🎯 Target: ₹{target}\n🛡️ SL: ₹{sl}")
                 else:
                     if trade["type"] == "BUY":
                         if price >= trade["target"]:
-                            send_telegram(f"🎯 <b>TARGET HIT!</b>\nAsset: {stock}\nProfit booked at {price} 💰")
+                            send_telegram(f"🎯 <b>TARGET HIT!</b>\nAsset: {stock}\nProfit booked at ₹{price} 💰")
                             with memory_lock: active_trades[stock] = None 
                         elif price <= trade["sl"]:
-                            send_telegram(f"🛡️ <b>STOP LOSS HIT</b>\nAsset: {stock}\nExited at {price}.")
+                            send_telegram(f"🛡️ <b>STOP LOSS HIT</b>\nAsset: {stock}\nExited at ₹{price}.")
                             with memory_lock: active_trades[stock] = None
                     elif trade["type"] == "SELL":
                         if price <= trade["target"]:
-                            send_telegram(f"🎯 <b>TARGET HIT!</b>\nAsset: {stock}\nProfit booked at {price} 💰")
+                            send_telegram(f"🎯 <b>TARGET HIT!</b>\nAsset: {stock}\nProfit booked at ₹{price} 💰")
                             with memory_lock: active_trades[stock] = None
                         elif price >= trade["sl"]:
-                            send_telegram(f"🛡️ <b>STOP LOSS HIT</b>\nAsset: {stock}\nExited at {price}.")
+                            send_telegram(f"🛡️ <b>STOP LOSS HIT</b>\nAsset: {stock}\nExited at ₹{price}.")
                             with memory_lock: active_trades[stock] = None
         except: pass
         time.sleep(60)
 
 threading.Thread(target=telegram_tracker, daemon=True).start()
 
+# ==========================================
+# FRONTEND API ROUTE & UPTIMEROBOT
+# ==========================================
 @app.route('/')
-def home(): return "Pro AI Server is Awake and Running Perfectly!"
+def home(): 
+    return "Global AI Trade Server is Awake and Running Perfectly!"
 
 @app.route('/get_best_trades')
 def get_best_trades():
@@ -139,26 +146,25 @@ def get_best_trades():
     trades_data = []
     
     for stock in STOCKS:
+        # Ticker format logic for UI
+        name = stock.replace(".NS", "").replace("=F", "").replace("=X", "")
+        tv_symbol = stock
+        if stock in INDIAN_STOCKS: tv_symbol = f"NSE:{name}"
+        elif stock == "GC=F": tv_symbol = "COMEX:GC1!"
+        elif stock == "SI=F": tv_symbol = "COMEX:SI1!"
+        elif stock == "CL=F": tv_symbol = "NYMEX:CL1!"
+        elif stock == "INR=X": tv_symbol = "FX_IDC:USDINR"
+
+        if not is_market_open(stock):
+            trades_data.append({
+                "stock": name, "tv_symbol": tv_symbol, "price": "--", "change": 0,
+                "signal": "SLEEP MODE 😴", "confidence": 0, "target": "--", "stop_loss": "--",
+                "timeframe": "Market Closed", "action_text": "Market is closed. Take rest or analyze.",
+                "support": "--", "resistance": "--", "vol_status": "No Activity", "play_alert": False
+            })
+            continue
+
         try:
-            # Clean Name & TradingView Symbol Logic
-            name = stock.replace(".NS", "").replace("=F", "").replace("=X", "")
-            tv_symbol = stock
-            if stock in INDIAN_STOCKS: tv_symbol = f"NSE:{name}"
-            elif stock == "GC=F": tv_symbol = "COMEX:GC1!"
-            elif stock == "SI=F": tv_symbol = "COMEX:SI1!"
-            elif stock == "CL=F": tv_symbol = "NYMEX:CL1!"
-            elif stock == "INR=X": tv_symbol = "FX_IDC:USDINR"
-
-            # ⚡ Market Open/Close Check
-            if not is_market_open(stock):
-                trades_data.append({
-                    "stock": name, "tv_symbol": tv_symbol, "price": "--", "change": 0,
-                    "signal": "SLEEP MODE 😴", "confidence": 0, "target": "--", "stop_loss": "--",
-                    "timeframe": "Market Closed", "action_text": "Market is closed. Take rest or analyze.",
-                    "support": "--", "resistance": "--", "vol_status": "No Activity", "play_alert": False
-                })
-                continue
-
             df = fetch_data(stock, mode)
             latest = df.iloc[-1]
             price = round(latest['close'], 2)
@@ -166,8 +172,8 @@ def get_best_trades():
             rsi = round(latest['RSI'], 2)
             support = round(latest['Support'], 2)
             resistance = round(latest['Resistance'], 2)
-            vol_status = "High Volume 🚀" if latest['volume'] > latest['Vol_SMA'] * 1.5 else "Normal Volume 📊"
             
+            vol_status = "High Volume 🚀" if latest['volume'] > latest['Vol_SMA'] * 1.5 else "Normal Volume 📊"
             change = round(((price - df.iloc[-2]['close']) / df.iloc[-2]['close']) * 100, 2)
             
             trend_score = 50
@@ -179,13 +185,13 @@ def get_best_trades():
 
             with memory_lock: trade = active_trades[stock]
             
-            play_alert = False # ⚡ Default No Music
+            play_alert = False # ⚡ Default: No Music
             
             if trade:
                 signal = f"ACTIVE {trade['type']} 🟢" if trade['type'] == 'BUY' else f"ACTIVE SELL 🔴"
                 target = trade['target']
                 stop_loss = trade['sl']
-                action_text = f"Trade is LIVE. Target: {target}."
+                action_text = f"Trade is LIVE. Target: ₹{target}."
                 conf = trend_score 
             else:
                 signal = "WAIT / HOLD 🟡"
@@ -197,20 +203,21 @@ def get_best_trades():
                 min_profit_pct = 0.007 if mode == "intraday" else 0.04
                 min_loss_pct = 0.0035 if mode == "intraday" else 0.02
                 
+                # ⚡ Perfect Prediction Logic (Triggers Music)
                 if (rsi < 45 and latest['MACD'] > latest['Signal_Line']) or price <= support * 1.002:
                     signal = "FRESH BUY 🚀"
                     target = round(price + max(atr * 3, price * min_profit_pct), 2)
                     stop_loss = round(price - max(atr * 1.5, price * min_loss_pct), 2)
                     action_text = "Perfect Entry! Take Trade."
                     conf = 95 
-                    play_alert = True # ⚡ MUSIC ON ONLY FOR PERFECT FRESH TRADE
+                    play_alert = True # ⚡ MUSIC ON!
                 elif (rsi > 65 and latest['MACD'] < latest['Signal_Line']) or price >= resistance * 0.998:
                     signal = "FRESH SELL 🔴"
                     target = round(price - max(atr * 3, price * min_profit_pct), 2)
                     stop_loss = round(price + max(atr * 1.5, price * min_loss_pct), 2)
                     action_text = "Perfect Short Entry! Take Trade."
                     conf = 95 
-                    play_alert = True # ⚡ MUSIC ON ONLY FOR PERFECT FRESH TRADE
+                    play_alert = True # ⚡ MUSIC ON!
             
             timeframe = "1-15 Mins (Fast)" if mode == "intraday" else "Swing (Next 3 Days)"
             
@@ -220,10 +227,18 @@ def get_best_trades():
                 "timeframe": timeframe, "action_text": action_text, "support": support,
                 "resistance": resistance, "vol_status": vol_status, "play_alert": play_alert
             })
-        except: pass
+        except Exception as e: 
+            # ⚡ Fallback for safety: If Yahoo API fails, still show the box
+            trades_data.append({
+                "stock": name, "tv_symbol": tv_symbol, "price": "Error", "change": 0,
+                "signal": "DATA ERROR ⚠️", "confidence": 0, "target": "--", "stop_loss": "--",
+                "timeframe": "Try again later", "action_text": "Failed to fetch live data.",
+                "support": "--", "resistance": "--", "vol_status": "--", "play_alert": False
+            })
         
     trades_data.sort(key=lambda x: x['confidence'], reverse=True)
     return jsonify({"status": "success", "data": trades_data})
 
 if __name__ == '__main__':
+    # ⚡ Single thread to keep memory synced
     app.run(host='0.0.0.0', port=5000, threaded=False)

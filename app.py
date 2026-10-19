@@ -23,11 +23,11 @@ active_trades = {stock: None for stock in STOCKS}
 memory_lock = threading.Lock()
 
 def is_market_open(stock):
-    # Python er default Timezone use kora holo (No external library needed)
+    # Python er default Timezone use kora holo jate kono library error na ashe
     ist = timezone(timedelta(hours=5, minutes=30))
     now = datetime.now(ist)
     
-    # Global Markets are open 24/5 (Mon-Fri)
+    # Global Markets (Gold, Silver, USD) are open 24/5 (Mon-Fri)
     if stock in GLOBAL_ASSETS:
         return now.weekday() < 5
         
@@ -63,9 +63,8 @@ def calculate_advanced_indicators(df):
     if 'volume' in df and df['volume'].sum() > 0:
         df['Vol_SMA'] = df['volume'].rolling(20).mean()
     else:
-        df['Vol_SMA'] = 1 # Fallback
+        df['Vol_SMA'] = 1 # Fallback for accurate math
     
-    # Safe fallback for NaN values
     return df.fillna(method='bfill').fillna(method='ffill')
 
 def fetch_data(stock, mode="intraday"):
@@ -76,8 +75,19 @@ def fetch_data(stock, mode="intraday"):
     res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}).json()
     quote = res['chart']['result'][0]['indicators']['quote'][0]
     
-    vol = quote.get('volume', np.zeros(len(quote['close'])))
-    df = pd.DataFrame({'close': quote['close'], 'high': quote['high'], 'low': quote['low'], 'volume': vol}).dropna()
+    # ⚡ DATA ERROR FIX for Gold/Silver (Safe Volume Check)
+    df = pd.DataFrame({
+        'close': quote.get('close', []),
+        'high': quote.get('high', []),
+        'low': quote.get('low', []),
+        'volume': quote.get('volume', [])
+    })
+    
+    if 'volume' not in df.columns or df['volume'].isnull().all():
+        df['volume'] = 0
+    df['volume'] = df['volume'].fillna(0)
+    df = df.dropna(subset=['close', 'high', 'low'])
+    
     return calculate_advanced_indicators(df)
 
 # ==========================================
@@ -203,7 +213,7 @@ def get_best_trades():
                 min_profit_pct = 0.007 if mode == "intraday" else 0.04
                 min_loss_pct = 0.0035 if mode == "intraday" else 0.02
                 
-                # ⚡ Perfect Prediction Logic (Triggers Music)
+                # ⚡ Perfect Prediction Logic (Triggers Music Only Here)
                 if (rsi < 45 and latest['MACD'] > latest['Signal_Line']) or price <= support * 1.002:
                     signal = "FRESH BUY 🚀"
                     target = round(price + max(atr * 3, price * min_profit_pct), 2)
@@ -228,7 +238,6 @@ def get_best_trades():
                 "resistance": resistance, "vol_status": vol_status, "play_alert": play_alert
             })
         except Exception as e: 
-            # ⚡ Fallback for safety: If Yahoo API fails, still show the box
             trades_data.append({
                 "stock": name, "tv_symbol": tv_symbol, "price": "Error", "change": 0,
                 "signal": "DATA ERROR ⚠️", "confidence": 0, "target": "--", "stop_loss": "--",
@@ -240,5 +249,4 @@ def get_best_trades():
     return jsonify({"status": "success", "data": trades_data})
 
 if __name__ == '__main__':
-    # ⚡ Single thread to keep memory synced
     app.run(host='0.0.0.0', port=5000, threaded=False)

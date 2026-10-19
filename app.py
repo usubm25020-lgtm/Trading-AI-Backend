@@ -20,7 +20,7 @@ STOCKS = INDIAN_STOCKS + GLOBAL_ASSETS
 
 # ⚡ Global RAM Memory
 active_trades = {stock: None for stock in STOCKS}
-hit_alerts = {stock: False for stock in STOCKS} # ⚡ Target Hit Tracker
+hit_alerts = {stock: False for stock in STOCKS} 
 memory_lock = threading.Lock()
 
 def is_market_open(stock):
@@ -66,8 +66,14 @@ def calculate_advanced_indicators(df):
     return df.bfill().ffill()
 
 def fetch_data(stock, mode="intraday"):
-    interval = "1m" if mode == "intraday" else "1d"
-    rng = "1d" if mode == "intraday" else "3mo"
+    # ⚡ SMART TIMEFRAME ADAPTATION
+    # Global Asset gulo intraday (scalp) mode a o 15m candle use korbe better accuracy er jonno
+    if mode == "intraday":
+        interval = "15m" if stock in GLOBAL_ASSETS else "1m"
+        rng = "5d" if stock in GLOBAL_ASSETS else "1d"
+    else:
+        interval = "1d"
+        rng = "3mo"
     
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{stock}?interval={interval}&range={rng}"
     res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}).json()
@@ -106,7 +112,7 @@ def fetch_data(stock, mode="intraday"):
 # 🔥 TELEGRAM BACKGROUND TRACKER
 # ==========================================
 def telegram_tracker():
-    send_telegram("✅ Ultimate AI Engine Live: Profit Music Trigger is Active!")
+    send_telegram("✅ AI Engine Live: Smart Timeframes for Global Markets Active!")
     while True:
         try:
             for stock in STOCKS:
@@ -123,15 +129,19 @@ def telegram_tracker():
                     macd_bullish = latest['MACD'] > latest['Signal_Line']
                     vol_breakout = latest['volume'] > latest['Vol_SMA']
                     
+                    # ⚡ ADJUSTED MULTIPLIERS FOR GLOBAL ASSETS TO PREVENT FREQUENT SL HITS
+                    atr_mult_target = 3.5 if stock in GLOBAL_ASSETS else 3.0
+                    atr_mult_sl = 2.0 if stock in GLOBAL_ASSETS else 1.5
+                    
                     if (rsi < 45 and macd_bullish and vol_breakout) or (price <= latest['Support'] * 1.002):
-                        target = round(price + max(latest['ATR'] * 3, price * 0.007), 2)
-                        sl = round(price - max(latest['ATR'] * 1.5, price * 0.0035), 2)
+                        target = round(price + max(latest['ATR'] * atr_mult_target, price * 0.007), 2)
+                        sl = round(price - max(latest['ATR'] * atr_mult_sl, price * 0.0035), 2)
                         with memory_lock: active_trades[stock] = {"type": "BUY", "target": target, "sl": sl}
                         send_telegram(f"🚀 <b>STRONG BUY ALERT</b>\nAsset: {stock}\nEntry: ₹{price}\n🎯 Target: ₹{target}\n🛡️ SL: ₹{sl}")
                     
                     elif (rsi > 65 and not macd_bullish and vol_breakout) or (price >= latest['Resistance'] * 0.998):
-                        target = round(price - max(latest['ATR'] * 3, price * 0.007), 2)
-                        sl = round(price + max(latest['ATR'] * 1.5, price * 0.0035), 2)
+                        target = round(price - max(latest['ATR'] * atr_mult_target, price * 0.007), 2)
+                        sl = round(price + max(latest['ATR'] * atr_mult_sl, price * 0.0035), 2)
                         with memory_lock: active_trades[stock] = {"type": "SELL", "target": target, "sl": sl}
                         send_telegram(f"⚠️ <b>STRONG SELL ALERT</b>\nAsset: {stock}\nEntry: ₹{price}\n🎯 Target: ₹{target}\n🛡️ SL: ₹{sl}")
                 else:
@@ -140,7 +150,7 @@ def telegram_tracker():
                             send_telegram(f"🎯 <b>TARGET HIT!</b>\nAsset: {stock}\nProfit booked at ₹{price} 💰")
                             with memory_lock: 
                                 active_trades[stock] = None 
-                                hit_alerts[stock] = True # ⚡ Trigger Music for UI!
+                                hit_alerts[stock] = True 
                         elif price <= trade["sl"]:
                             send_telegram(f"🛡️ <b>STOP LOSS HIT</b>\nAsset: {stock}\nExited at ₹{price}.")
                             with memory_lock: active_trades[stock] = None
@@ -149,7 +159,7 @@ def telegram_tracker():
                             send_telegram(f"🎯 <b>TARGET HIT!</b>\nAsset: {stock}\nProfit booked at ₹{price} 💰")
                             with memory_lock: 
                                 active_trades[stock] = None
-                                hit_alerts[stock] = True # ⚡ Trigger Music for UI!
+                                hit_alerts[stock] = True 
                         elif price >= trade["sl"]:
                             send_telegram(f"🛡️ <b>STOP LOSS HIT</b>\nAsset: {stock}\nExited at ₹{price}.")
                             with memory_lock: active_trades[stock] = None
@@ -159,7 +169,7 @@ def telegram_tracker():
 threading.Thread(target=telegram_tracker, daemon=True).start()
 
 # ==========================================
-# FRONTEND API ROUTE & UPTIMEROBOT
+# FRONTEND API ROUTE
 # ==========================================
 @app.route('/')
 def home(): 
@@ -211,7 +221,7 @@ def get_best_trades():
             with memory_lock: 
                 trade = active_trades[stock]
                 just_hit = hit_alerts[stock]
-                hit_alerts[stock] = False # ⚡ Reset alert after reading
+                hit_alerts[stock] = False 
             
             play_alert = False
             
@@ -221,7 +231,7 @@ def get_best_trades():
                 stop_loss = "--"
                 action_text = "Awesome! Profit booked successfully. Waiting for new setup."
                 conf = 100 
-                play_alert = True # ⚡ MUSIC WILL PLAY HERE!
+                play_alert = True 
             elif trade:
                 signal = f"ACTIVE {trade['type']} 🟢" if trade['type'] == 'BUY' else f"ACTIVE SELL 🔴"
                 target = trade['target']
@@ -235,23 +245,30 @@ def get_best_trades():
                 action_text = "Scanning for perfect setup."
                 conf = 0 
                 
+                # ⚡ ADJUSTED MULTIPLIERS FOR UI DISPLAY
+                atr_mult_target = 3.5 if stock in GLOBAL_ASSETS else 3.0
+                atr_mult_sl = 2.0 if stock in GLOBAL_ASSETS else 1.5
                 min_profit_pct = 0.007 if mode == "intraday" else 0.04
                 min_loss_pct = 0.0035 if mode == "intraday" else 0.02
                 
                 if (rsi < 45 and latest['MACD'] > latest['Signal_Line']) or price <= support * 1.002:
                     signal = "FRESH BUY 🚀"
-                    target = round(price + max(atr * 3, price * min_profit_pct), 2)
-                    stop_loss = round(price - max(atr * 1.5, price * min_loss_pct), 2)
+                    target = round(price + max(atr * atr_mult_target, price * min_profit_pct), 2)
+                    stop_loss = round(price - max(atr * atr_mult_sl, price * min_loss_pct), 2)
                     action_text = "Perfect Entry! Take Trade."
                     conf = 95 
                 elif (rsi > 65 and latest['MACD'] < latest['Signal_Line']) or price >= resistance * 0.998:
                     signal = "FRESH SELL 🔴"
-                    target = round(price - max(atr * 3, price * min_profit_pct), 2)
-                    stop_loss = round(price + max(atr * 1.5, price * min_loss_pct), 2)
+                    target = round(price - max(atr * atr_mult_target, price * min_profit_pct), 2)
+                    stop_loss = round(price + max(atr * atr_mult_sl, price * min_loss_pct), 2)
                     action_text = "Perfect Short Entry! Take Trade."
                     conf = 95 
             
-            timeframe = "1-15 Mins (Fast)" if mode == "intraday" else "Swing (Next 3 Days)"
+            # ⚡ Dynamic Timeframe display text
+            if mode == "intraday":
+                 timeframe = "15-60 Mins (Safe Scalp)" if stock in GLOBAL_ASSETS else "1-15 Mins (Fast)"
+            else:
+                 timeframe = "Swing (Next 3 Days)"
             
             trades_data.append({
                 "stock": name, "tv_symbol": tv_symbol, "price": price, "change": change,

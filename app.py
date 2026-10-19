@@ -17,7 +17,6 @@ CHAT_ID = "7188544429"
 STOCKS = ["RELIANCE.NS", "TATAMOTORS.NS", "HDFCBANK.NS", "TCS.NS", "INFY.NS", "SBIN.NS"]
 MEMORY_FILE = "trade_memory.json"
 
-# 🔥 Load from File Memory
 def load_memory():
     if os.path.exists(MEMORY_FILE):
         try:
@@ -26,7 +25,6 @@ def load_memory():
         except: pass
     return {stock: None for stock in STOCKS}
 
-# 🔥 Save to File Memory (যাতে HTML দেখতে পায়)
 def save_memory(data):
     with open(MEMORY_FILE, "w") as f:
         json.dump(data, f)
@@ -58,9 +56,6 @@ def fetch_data(stock, mode="intraday"):
     df = pd.DataFrame({'close': quote['close'], 'high': quote['high'], 'low': quote['low']}).dropna()
     return calculate_indicators(df)
 
-# ==========================================
-# 🔥 SMART BACKGROUND TRACKER (Telegram)
-# ==========================================
 def telegram_tracker():
     send_telegram("✅ System Live: Database Memory & Auto-Alerts are running!")
     while True:
@@ -113,25 +108,22 @@ def telegram_tracker():
                             memory_changed = True
                             
             if memory_changed:
-                save_memory(active_trades) # ⚡ ফাইলে সেভ করে দিল
+                save_memory(active_trades)
         except: pass
         time.sleep(60) 
 
 threading.Thread(target=telegram_tracker, daemon=True).start()
 
-# ==========================================
-# FRONTEND API ROUTE (Perfect Logic)
-# ==========================================
+# ⚡ FIXED: Added Main Route for UptimeRobot
 @app.route('/')
 def home():
-    return "Server is Awake in Database Tracking Mode!"
+    return "Server is Awake and Running Perfectly!"
 
 @app.route('/get_best_trades')
 def get_best_trades():
     mode = request.args.get('mode', 'intraday') 
     trades_data = []
     
-    # ⚡ HTML-কে সরাসরি ডাটাবেস ফাইল থেকে পড়ানো হচ্ছে
     active_trades = load_memory()
     
     for stock in STOCKS:

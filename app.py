@@ -3,7 +3,6 @@ from flask_cors import CORS
 import requests
 import pandas as pd
 import numpy as np
-from datetime import datetime
 import threading
 import time
 
@@ -14,9 +13,8 @@ TELEGRAM_TOKEN = "8223149909:AAE8hQlu-coYVlrdd5v810D4HcOmPiZBOP8"
 CHAT_ID = "7188544429"
 STOCKS = ["RELIANCE.NS", "TATAMOTORS.NS", "HDFCBANK.NS", "TCS.NS", "INFY.NS", "SBIN.NS"]
 
-# 🔥 Global Memory (RAM) - ১০০% ফাস্ট এবং সিঙ্কড!
 active_trades = {stock: None for stock in STOCKS}
-memory_lock = threading.Lock() # ⚡ ডেটা যাতে ওভারল্যাপ না হয় তার জন্য লক
+memory_lock = threading.Lock()
 
 def send_telegram(message):
     try:
@@ -24,78 +22,100 @@ def send_telegram(message):
         requests.post(url, data={"chat_id": CHAT_ID, "text": message, "parse_mode": "HTML"})
     except: pass
 
-def calculate_indicators(df):
-    df['EMA_20'] = df['close'].ewm(span=20, adjust=False).mean()
-    df['EMA_50'] = df['close'].ewm(span=50, adjust=False).mean()
+def calculate_advanced_indicators(df):
+    # ⚡ 10,000x Pro Indicators
+    df['EMA_9'] = df['close'].ewm(span=9, adjust=False).mean()
+    df['EMA_21'] = df['close'].ewm(span=21, adjust=False).mean()
+    
     delta = df['close'].diff()
-    gain = delta.where(delta > 0, 0).ewm(com=14).mean()
-    loss = -delta.where(delta < 0, 0).ewm(com=14).mean()
+    gain = delta.where(delta > 0, 0).rolling(14).mean()
+    loss = -delta.where(delta < 0, 0).rolling(14).mean()
     df['RSI'] = 100 - (100 / (1 + (gain / loss)))
+    
     df['ATR'] = np.maximum(df['high'] - df['low'], np.abs(df['high'] - df['close'].shift())).rolling(14).mean()
+    
     df['MACD'] = df['close'].ewm(span=12).mean() - df['close'].ewm(span=26).mean()
     df['Signal_Line'] = df['MACD'].ewm(span=9).mean()
-    return df
+    
+    # 🔥 New: Support, Resistance & Volume
+    df['Support'] = df['low'].rolling(20).min()
+    df['Resistance'] = df['high'].rolling(20).max()
+    df['Vol_SMA'] = df['volume'].rolling(20).mean()
+    
+    return df.bfill()
 
 def fetch_data(stock, mode="intraday"):
-    interval = "1m" if mode == "intraday" else "15m"
-    rng = "1d" if mode == "intraday" else "5d"
+    # ⚡ Fix: Day Trade now uses 1 Day ('1d') candles for Tomorrow's predictions!
+    interval = "1m" if mode == "intraday" else "1d"
+    rng = "1d" if mode == "intraday" else "3mo"
+    
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{stock}?interval={interval}&range={rng}"
     res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}).json()
     quote = res['chart']['result'][0]['indicators']['quote'][0]
-    df = pd.DataFrame({'close': quote['close'], 'high': quote['high'], 'low': quote['low']}).dropna()
-    return calculate_indicators(df)
+    
+    df = pd.DataFrame({
+        'close': quote['close'], 
+        'high': quote['high'], 
+        'low': quote['low'],
+        'volume': quote.get('volume', np.zeros(len(quote['close'])))
+    }).dropna()
+    return calculate_advanced_indicators(df)
 
 # ==========================================
-# 🔥 SMART BACKGROUND TRACKER (Telegram)
+# 🔥 SMART BACKGROUND TRACKER
 # ==========================================
 def telegram_tracker():
-    global active_trades
-    send_telegram("✅ System Live: Global Memory & Auto-Alerts are running perfectly!")
+    send_telegram("✅ 10,000x Pro System Live: High-Profit AI Engine running!")
     while True:
         try:
             for stock in STOCKS:
-                df = fetch_data(stock, "intraday") 
+                df = fetch_data(stock, "intraday") # Tracking is always fast (1m)
                 latest = df.iloc[-1]
                 price = round(latest['close'], 2)
-                rsi = round(latest['RSI'], 2)
-                atr = round(latest['ATR'], 2)
                 
-                with memory_lock: # ⚡ ডেটা পড়ার আগে লক করা হলো
-                    trade = active_trades[stock]
+                with memory_lock: trade = active_trades[stock]
                 
                 if trade is None:
-                    if rsi < 35 and latest['MACD'] > latest['Signal_Line']:
-                        target = round(price + (atr * 2.5), 2)
-                        stop_loss = round(price - (atr * 1.2), 2)
-                        with memory_lock: # ⚡ ডেটা লেখার আগে লক করা হলো
-                            active_trades[stock] = {"type": "BUY", "entry": price, "target": target, "sl": stop_loss}
-                        send_telegram(f"🚀 <b>NEW BUY TRADE</b>\nStock: {stock}\nEntry: ₹{price}\nTarget: ₹{target}\nSL: ₹{stop_loss}\nReason: RSI Oversold & MACD Bullish.")
+                    rsi = latest['RSI']
+                    macd_bullish = latest['MACD'] > latest['Signal_Line']
+                    vol_breakout = latest['volume'] > latest['Vol_SMA']
                     
-                    elif rsi > 70 and latest['MACD'] < latest['Signal_Line']:
-                        target = round(price - (atr * 2.5), 2)
-                        stop_loss = round(price + (atr * 1.2), 2)
+                    # 🚀 BIG PROFIT LOGIC
+                    if (rsi < 45 and macd_bullish and vol_breakout) or (price <= latest['Support'] * 1.002):
+                        target = round(price + max(latest['ATR'] * 3, price * 0.007), 2) # Min 0.7% Profit
+                        sl = round(price - max(latest['ATR'] * 1.5, price * 0.0035), 2)
+                        
                         with memory_lock:
-                            active_trades[stock] = {"type": "SELL", "entry": price, "target": target, "sl": stop_loss}
-                        send_telegram(f"⚠️ <b>NEW SELL TRADE</b>\nStock: {stock}\nEntry: ₹{price}\nTarget: ₹{target}\nSL: ₹{stop_loss}\nReason: Market Overbought.")
+                            active_trades[stock] = {"type": "BUY", "target": target, "sl": sl}
+                        send_telegram(f"🚀 <b>STRONG BUY ALERT</b>\nStock: {stock}\nEntry: ₹{price}\n🎯 Target: ₹{target} (Big Move)\n🛡️ SL: ₹{sl}\nReason: Volume Breakout / Support Bounce.")
+                    
+                    elif (rsi > 65 and not macd_bullish and vol_breakout) or (price >= latest['Resistance'] * 0.998):
+                        target = round(price - max(latest['ATR'] * 3, price * 0.007), 2)
+                        sl = round(price + max(latest['ATR'] * 1.5, price * 0.0035), 2)
+                        
+                        with memory_lock:
+                            active_trades[stock] = {"type": "SELL", "target": target, "sl": sl}
+                        send_telegram(f"⚠️ <b>STRONG SELL ALERT</b>\nStock: {stock}\nEntry: ₹{price}\n🎯 Target: ₹{target}\n🛡️ SL: ₹{sl}\nReason: Resistance Rejection.")
                 else:
+                    # Live Profit/Loss Tracking
                     if trade["type"] == "BUY":
                         if price >= trade["target"]:
-                            send_telegram(f"🎯 <b>TARGET HIT!</b>\nStock: {stock}\nProfit booked at ₹{price} (Target was ₹{trade['target']}).")
+                            send_telegram(f"🎯 <b>MASSIVE TARGET HIT!</b>\nStock: {stock}\nProfit booked at ₹{price} 💰💰")
                             with memory_lock: active_trades[stock] = None 
                         elif price <= trade["sl"]:
-                            send_telegram(f"🛡️ <b>STOP LOSS HIT</b>\nStock: {stock}\nExited at ₹{price} to prevent big losses.")
+                            send_telegram(f"🛡️ <b>STOP LOSS HIT</b>\nStock: {stock}\nExited at ₹{price}.")
                             with memory_lock: active_trades[stock] = None
                             
                     elif trade["type"] == "SELL":
                         if price <= trade["target"]:
-                            send_telegram(f"🎯 <b>TARGET HIT!</b>\nStock: {stock}\nProfit booked at ₹{price} (Target was ₹{trade['target']}).")
+                            send_telegram(f"🎯 <b>MASSIVE TARGET HIT!</b>\nStock: {stock}\nProfit booked at ₹{price} 💰💰")
                             with memory_lock: active_trades[stock] = None
                         elif price >= trade["sl"]:
-                            send_telegram(f"🛡️ <b>STOP LOSS HIT</b>\nStock: {stock}\nExited at ₹{price} to prevent big losses.")
+                            send_telegram(f"🛡️ <b>STOP LOSS HIT</b>\nStock: {stock}\nExited at ₹{price}.")
                             with memory_lock: active_trades[stock] = None
                             
         except: pass
-        time.sleep(60) 
+        time.sleep(60)
 
 threading.Thread(target=telegram_tracker, daemon=True).start()
 
@@ -103,8 +123,7 @@ threading.Thread(target=telegram_tracker, daemon=True).start()
 # FRONTEND API ROUTE
 # ==========================================
 @app.route('/')
-def home():
-    return "Server is Awake and Running Perfectly!"
+def home(): return "10,000x Pro AI Server is Awake!"
 
 @app.route('/get_best_trades')
 def get_best_trades():
@@ -119,45 +138,53 @@ def get_best_trades():
             price = round(latest['close'], 2)
             atr = round(latest['ATR'], 2)
             rsi = round(latest['RSI'], 2)
+            support = round(latest['Support'], 2)
+            resistance = round(latest['Resistance'], 2)
+            vol_status = "High Volume Breakout 🚀" if latest['volume'] > latest['Vol_SMA'] * 1.5 else "Normal Volume 📊"
+            
             change = round(((price - df.iloc[-2]['close']) / df.iloc[-2]['close']) * 100, 2)
             
+            # Confidence Logic
             trend_score = 50
-            if latest['EMA_20'] > latest['EMA_50']: trend_score += 15
+            if latest['EMA_9'] > latest['EMA_21']: trend_score += 15
             if latest['MACD'] > latest['Signal_Line']: trend_score += 15
-            if rsi < 40: trend_score += 20
-            elif rsi > 70: trend_score -= 30
-            trend_score = min(max(int(trend_score), 0), 100) 
+            if latest['volume'] > latest['Vol_SMA']: trend_score += 15
+            if rsi < 45: trend_score += 10
+            trend_score = min(max(int(trend_score), 0), 99) 
 
-            with memory_lock: # ⚡ UI-কে ডাটা দেওয়ার সময় লক করা হলো
-                trade = active_trades[stock]
+            with memory_lock: trade = active_trades[stock]
             
             if trade:
                 signal = f"ACTIVE {trade['type']} 🟢" if trade['type'] == 'BUY' else f"ACTIVE SELL 🔴"
                 target = trade['target']
                 stop_loss = trade['sl']
-                action_text = f"Trade running. Waiting for Target ₹{target} or SL ₹{stop_loss}."
+                action_text = f"Trade is LIVE. Relax & wait for Target ₹{target}."
                 conf = trend_score 
             else:
                 signal = "WAIT / HOLD 🟡"
                 target = "--"
                 stop_loss = "--"
-                action_text = "No active setup. Waiting for perfect entry."
+                action_text = "Scanning for perfect high-profit setup."
                 conf = 0 
                 
-                if rsi < 35 and latest['MACD'] > latest['Signal_Line']:
-                    signal = "FRESH BUY SETUP 🚀"
-                    target = round(price + (atr * 2.5), 2)
-                    stop_loss = round(price - (atr * 1.2), 2)
-                    action_text = "Perfect entry point detected! Check Telegram."
+                # ⚡ Prediction logic for UI
+                min_profit_pct = 0.007 if mode == "intraday" else 0.04 # 4% target for swing/day
+                min_loss_pct = 0.0035 if mode == "intraday" else 0.02
+                
+                if (rsi < 45 and latest['MACD'] > latest['Signal_Line']) or price <= support * 1.002:
+                    signal = "FRESH BUY 🚀"
+                    target = round(price + max(atr * 3, price * min_profit_pct), 2)
+                    stop_loss = round(price - max(atr * 1.5, price * min_loss_pct), 2)
+                    action_text = "Great Support Level / Breakout!"
                     conf = 95 
-                elif rsi > 70 and latest['MACD'] < latest['Signal_Line']:
-                    signal = "FRESH SELL SETUP 🔴"
-                    target = round(price - (atr * 2.5), 2)
-                    stop_loss = round(price + (atr * 1.2), 2)
-                    action_text = "Market overbought! Check Telegram."
+                elif (rsi > 65 and latest['MACD'] < latest['Signal_Line']) or price >= resistance * 0.998:
+                    signal = "FRESH SELL 🔴"
+                    target = round(price - max(atr * 3, price * min_profit_pct), 2)
+                    stop_loss = round(price + max(atr * 1.5, price * min_loss_pct), 2)
+                    action_text = "Resistance Rejection detected!"
                     conf = 95 
             
-            timeframe = "1-10 Mins" if mode == "intraday" else "Current Day/Swing"
+            timeframe = "1-15 Mins (Fast)" if mode == "intraday" else "Tomorrow / Next 3 Days 📅"
             
             trades_data.append({
                 "stock": stock.replace(".NS", ""),
@@ -169,8 +196,9 @@ def get_best_trades():
                 "stop_loss": stop_loss,
                 "timeframe": timeframe,
                 "action_text": action_text,
-                "sentiment": "Neutral",
-                "market_condition": "Live Tracking"
+                "support": support,
+                "resistance": resistance,
+                "vol_status": vol_status
             })
         except: pass
         
@@ -178,5 +206,4 @@ def get_best_trades():
     return jsonify({"status": "success", "data": trades_data})
 
 if __name__ == '__main__':
-    # ⚡ Use threaded=False to ensure single memory space
-    app.run(host='0.0.0.0', port=5000, threaded=False) 
+    app.run(host='0.0.0.0', port=5000, threaded=False)

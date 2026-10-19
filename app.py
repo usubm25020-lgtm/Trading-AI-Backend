@@ -20,6 +20,7 @@ STOCKS = INDIAN_STOCKS + GLOBAL_ASSETS
 
 # ⚡ Global RAM Memory
 active_trades = {stock: None for stock in STOCKS}
+hit_alerts = {stock: False for stock in STOCKS} # ⚡ Target Hit Tracker
 memory_lock = threading.Lock()
 
 def is_market_open(stock):
@@ -62,7 +63,6 @@ def calculate_advanced_indicators(df):
     else:
         df['Vol_SMA'] = 1 
     
-    # ⚡ Updated Safe Fill for newer pandas versions
     return df.bfill().ffill()
 
 def fetch_data(stock, mode="intraday"):
@@ -74,7 +74,7 @@ def fetch_data(stock, mode="intraday"):
     
     result = res.get('chart', {}).get('result', [])
     if not result:
-        raise ValueError("No data returned from API")
+        raise ValueError("No data")
         
     quote = result[0]['indicators']['quote'][0]
     
@@ -82,8 +82,6 @@ def fetch_data(stock, mode="intraday"):
     high_list = quote.get('high', [])
     low_list = quote.get('low', [])
     
-    # ⚡ 100% BULLETPROOF FIX FOR GLOBAL ASSETS
-    # We ensure all lists are the same length before making the DataFrame
     df = pd.DataFrame({
         'close': close_list,
         'high': high_list,
@@ -91,17 +89,16 @@ def fetch_data(stock, mode="intraday"):
     })
     
     vol_list = quote.get('volume', [])
-    # Check if volume exists and exactly matches the size of close data
     if vol_list and len(vol_list) == len(close_list):
         df['volume'] = vol_list
     else:
-        df['volume'] = 0 # Fallback to 0 if size mismatch or missing
+        df['volume'] = 0 
         
     df['volume'] = df['volume'].fillna(0)
     df = df.dropna(subset=['close', 'high', 'low'])
     
     if df.empty:
-        raise ValueError("Data is empty after processing")
+        raise ValueError("Data is empty")
         
     return calculate_advanced_indicators(df)
 
@@ -109,7 +106,7 @@ def fetch_data(stock, mode="intraday"):
 # 🔥 TELEGRAM BACKGROUND TRACKER
 # ==========================================
 def telegram_tracker():
-    send_telegram("✅ Ultimate AI Engine Live: Indian & Global Markets Tracked Perfectly!")
+    send_telegram("✅ Ultimate AI Engine Live: Profit Music Trigger is Active!")
     while True:
         try:
             for stock in STOCKS:
@@ -141,14 +138,18 @@ def telegram_tracker():
                     if trade["type"] == "BUY":
                         if price >= trade["target"]:
                             send_telegram(f"🎯 <b>TARGET HIT!</b>\nAsset: {stock}\nProfit booked at ₹{price} 💰")
-                            with memory_lock: active_trades[stock] = None 
+                            with memory_lock: 
+                                active_trades[stock] = None 
+                                hit_alerts[stock] = True # ⚡ Trigger Music for UI!
                         elif price <= trade["sl"]:
                             send_telegram(f"🛡️ <b>STOP LOSS HIT</b>\nAsset: {stock}\nExited at ₹{price}.")
                             with memory_lock: active_trades[stock] = None
                     elif trade["type"] == "SELL":
                         if price <= trade["target"]:
                             send_telegram(f"🎯 <b>TARGET HIT!</b>\nAsset: {stock}\nProfit booked at ₹{price} 💰")
-                            with memory_lock: active_trades[stock] = None
+                            with memory_lock: 
+                                active_trades[stock] = None
+                                hit_alerts[stock] = True # ⚡ Trigger Music for UI!
                         elif price >= trade["sl"]:
                             send_telegram(f"🛡️ <b>STOP LOSS HIT</b>\nAsset: {stock}\nExited at ₹{price}.")
                             with memory_lock: active_trades[stock] = None
@@ -166,7 +167,7 @@ def home():
 
 @app.route('/get_best_trades')
 def get_best_trades():
-    global active_trades
+    global active_trades, hit_alerts
     mode = request.args.get('mode', 'intraday') 
     trades_data = []
     
@@ -207,11 +208,21 @@ def get_best_trades():
             if rsi < 45: trend_score += 10
             trend_score = min(max(int(trend_score), 0), 99) 
 
-            with memory_lock: trade = active_trades[stock]
+            with memory_lock: 
+                trade = active_trades[stock]
+                just_hit = hit_alerts[stock]
+                hit_alerts[stock] = False # ⚡ Reset alert after reading
             
             play_alert = False
             
-            if trade:
+            if just_hit:
+                signal = "TARGET HIT! 💰🟢"
+                target = "--"
+                stop_loss = "--"
+                action_text = "Awesome! Profit booked successfully. Waiting for new setup."
+                conf = 100 
+                play_alert = True # ⚡ MUSIC WILL PLAY HERE!
+            elif trade:
                 signal = f"ACTIVE {trade['type']} 🟢" if trade['type'] == 'BUY' else f"ACTIVE SELL 🔴"
                 target = trade['target']
                 stop_loss = trade['sl']
@@ -233,14 +244,12 @@ def get_best_trades():
                     stop_loss = round(price - max(atr * 1.5, price * min_loss_pct), 2)
                     action_text = "Perfect Entry! Take Trade."
                     conf = 95 
-                    play_alert = True
                 elif (rsi > 65 and latest['MACD'] < latest['Signal_Line']) or price >= resistance * 0.998:
                     signal = "FRESH SELL 🔴"
                     target = round(price - max(atr * 3, price * min_profit_pct), 2)
                     stop_loss = round(price + max(atr * 1.5, price * min_loss_pct), 2)
                     action_text = "Perfect Short Entry! Take Trade."
                     conf = 95 
-                    play_alert = True
             
             timeframe = "1-15 Mins (Fast)" if mode == "intraday" else "Swing (Next 3 Days)"
             

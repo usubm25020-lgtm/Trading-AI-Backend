@@ -23,15 +23,12 @@ active_trades = {stock: None for stock in STOCKS}
 memory_lock = threading.Lock()
 
 def is_market_open(stock):
-    # Python er default Timezone use kora holo jate kono library error na ashe
     ist = timezone(timedelta(hours=5, minutes=30))
     now = datetime.now(ist)
     
-    # Global Markets (Gold, Silver, USD) are open 24/5 (Mon-Fri)
     if stock in GLOBAL_ASSETS:
         return now.weekday() < 5
         
-    # Indian Market: Mon-Fri, 9:15 AM to 3:30 PM
     if now.weekday() >= 5: return False
     
     market_open = now.replace(hour=9, minute=15, second=0, microsecond=0)
@@ -63,9 +60,10 @@ def calculate_advanced_indicators(df):
     if 'volume' in df and df['volume'].sum() > 0:
         df['Vol_SMA'] = df['volume'].rolling(20).mean()
     else:
-        df['Vol_SMA'] = 1 # Fallback for accurate math
+        df['Vol_SMA'] = 1 
     
-    return df.fillna(method='bfill').fillna(method='ffill')
+    # ⚡ Updated Safe Fill for newer pandas versions
+    return df.bfill().ffill()
 
 def fetch_data(stock, mode="intraday"):
     interval = "1m" if mode == "intraday" else "1d"
@@ -73,21 +71,38 @@ def fetch_data(stock, mode="intraday"):
     
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{stock}?interval={interval}&range={rng}"
     res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}).json()
-    quote = res['chart']['result'][0]['indicators']['quote'][0]
     
-    # ⚡ DATA ERROR FIX for Gold/Silver (Safe Volume Check)
+    result = res.get('chart', {}).get('result', [])
+    if not result:
+        raise ValueError("No data returned from API")
+        
+    quote = result[0]['indicators']['quote'][0]
+    
+    close_list = quote.get('close', [])
+    high_list = quote.get('high', [])
+    low_list = quote.get('low', [])
+    
+    # ⚡ 100% BULLETPROOF FIX FOR GLOBAL ASSETS
+    # We ensure all lists are the same length before making the DataFrame
     df = pd.DataFrame({
-        'close': quote.get('close', []),
-        'high': quote.get('high', []),
-        'low': quote.get('low', []),
-        'volume': quote.get('volume', [])
+        'close': close_list,
+        'high': high_list,
+        'low': low_list
     })
     
-    if 'volume' not in df.columns or df['volume'].isnull().all():
-        df['volume'] = 0
+    vol_list = quote.get('volume', [])
+    # Check if volume exists and exactly matches the size of close data
+    if vol_list and len(vol_list) == len(close_list):
+        df['volume'] = vol_list
+    else:
+        df['volume'] = 0 # Fallback to 0 if size mismatch or missing
+        
     df['volume'] = df['volume'].fillna(0)
     df = df.dropna(subset=['close', 'high', 'low'])
     
+    if df.empty:
+        raise ValueError("Data is empty after processing")
+        
     return calculate_advanced_indicators(df)
 
 # ==========================================
@@ -156,7 +171,6 @@ def get_best_trades():
     trades_data = []
     
     for stock in STOCKS:
-        # Ticker format logic for UI
         name = stock.replace(".NS", "").replace("=F", "").replace("=X", "")
         tv_symbol = stock
         if stock in INDIAN_STOCKS: tv_symbol = f"NSE:{name}"
@@ -195,7 +209,7 @@ def get_best_trades():
 
             with memory_lock: trade = active_trades[stock]
             
-            play_alert = False # ⚡ Default: No Music
+            play_alert = False
             
             if trade:
                 signal = f"ACTIVE {trade['type']} 🟢" if trade['type'] == 'BUY' else f"ACTIVE SELL 🔴"
@@ -213,21 +227,20 @@ def get_best_trades():
                 min_profit_pct = 0.007 if mode == "intraday" else 0.04
                 min_loss_pct = 0.0035 if mode == "intraday" else 0.02
                 
-                # ⚡ Perfect Prediction Logic (Triggers Music Only Here)
                 if (rsi < 45 and latest['MACD'] > latest['Signal_Line']) or price <= support * 1.002:
                     signal = "FRESH BUY 🚀"
                     target = round(price + max(atr * 3, price * min_profit_pct), 2)
                     stop_loss = round(price - max(atr * 1.5, price * min_loss_pct), 2)
                     action_text = "Perfect Entry! Take Trade."
                     conf = 95 
-                    play_alert = True # ⚡ MUSIC ON!
+                    play_alert = True
                 elif (rsi > 65 and latest['MACD'] < latest['Signal_Line']) or price >= resistance * 0.998:
                     signal = "FRESH SELL 🔴"
                     target = round(price - max(atr * 3, price * min_profit_pct), 2)
                     stop_loss = round(price + max(atr * 1.5, price * min_loss_pct), 2)
                     action_text = "Perfect Short Entry! Take Trade."
                     conf = 95 
-                    play_alert = True # ⚡ MUSIC ON!
+                    play_alert = True
             
             timeframe = "1-15 Mins (Fast)" if mode == "intraday" else "Swing (Next 3 Days)"
             
@@ -241,7 +254,7 @@ def get_best_trades():
             trades_data.append({
                 "stock": name, "tv_symbol": tv_symbol, "price": "Error", "change": 0,
                 "signal": "DATA ERROR ⚠️", "confidence": 0, "target": "--", "stop_loss": "--",
-                "timeframe": "Try again later", "action_text": "Failed to fetch live data.",
+                "timeframe": "Try again later", "action_text": "API Error: " + str(e),
                 "support": "--", "resistance": "--", "vol_status": "--", "play_alert": False
             })
         

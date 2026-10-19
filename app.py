@@ -6,8 +6,6 @@ import numpy as np
 from datetime import datetime
 import threading
 import time
-import json
-import os
 
 app = Flask(__name__)
 CORS(app)
@@ -15,19 +13,10 @@ CORS(app)
 TELEGRAM_TOKEN = "8223149909:AAE8hQlu-coYVlrdd5v810D4HcOmPiZBOP8"
 CHAT_ID = "7188544429"
 STOCKS = ["RELIANCE.NS", "TATAMOTORS.NS", "HDFCBANK.NS", "TCS.NS", "INFY.NS", "SBIN.NS"]
-MEMORY_FILE = "trade_memory.json"
 
-def load_memory():
-    if os.path.exists(MEMORY_FILE):
-        try:
-            with open(MEMORY_FILE, "r") as f:
-                return json.load(f)
-        except: pass
-    return {stock: None for stock in STOCKS}
-
-def save_memory(data):
-    with open(MEMORY_FILE, "w") as f:
-        json.dump(data, f)
+# 🔥 Global Memory (RAM) - ১০০% ফাস্ট এবং সিঙ্কড!
+active_trades = {stock: None for stock in STOCKS}
+memory_lock = threading.Lock() # ⚡ ডেটা যাতে ওভারল্যাপ না হয় তার জন্য লক
 
 def send_telegram(message):
     try:
@@ -56,13 +45,14 @@ def fetch_data(stock, mode="intraday"):
     df = pd.DataFrame({'close': quote['close'], 'high': quote['high'], 'low': quote['low']}).dropna()
     return calculate_indicators(df)
 
+# ==========================================
+# 🔥 SMART BACKGROUND TRACKER (Telegram)
+# ==========================================
 def telegram_tracker():
-    send_telegram("✅ System Live: Database Memory & Auto-Alerts are running!")
+    global active_trades
+    send_telegram("✅ System Live: Global Memory & Auto-Alerts are running perfectly!")
     while True:
         try:
-            active_trades = load_memory()
-            memory_changed = False
-            
             for stock in STOCKS:
                 df = fetch_data(stock, "intraday") 
                 latest = df.iloc[-1]
@@ -70,61 +60,57 @@ def telegram_tracker():
                 rsi = round(latest['RSI'], 2)
                 atr = round(latest['ATR'], 2)
                 
-                trade = active_trades.get(stock)
+                with memory_lock: # ⚡ ডেটা পড়ার আগে লক করা হলো
+                    trade = active_trades[stock]
                 
                 if trade is None:
                     if rsi < 35 and latest['MACD'] > latest['Signal_Line']:
                         target = round(price + (atr * 2.5), 2)
                         stop_loss = round(price - (atr * 1.2), 2)
-                        active_trades[stock] = {"type": "BUY", "entry": price, "target": target, "sl": stop_loss}
-                        memory_changed = True
+                        with memory_lock: # ⚡ ডেটা লেখার আগে লক করা হলো
+                            active_trades[stock] = {"type": "BUY", "entry": price, "target": target, "sl": stop_loss}
                         send_telegram(f"🚀 <b>NEW BUY TRADE</b>\nStock: {stock}\nEntry: ₹{price}\nTarget: ₹{target}\nSL: ₹{stop_loss}\nReason: RSI Oversold & MACD Bullish.")
                     
                     elif rsi > 70 and latest['MACD'] < latest['Signal_Line']:
                         target = round(price - (atr * 2.5), 2)
                         stop_loss = round(price + (atr * 1.2), 2)
-                        active_trades[stock] = {"type": "SELL", "entry": price, "target": target, "sl": stop_loss}
-                        memory_changed = True
+                        with memory_lock:
+                            active_trades[stock] = {"type": "SELL", "entry": price, "target": target, "sl": stop_loss}
                         send_telegram(f"⚠️ <b>NEW SELL TRADE</b>\nStock: {stock}\nEntry: ₹{price}\nTarget: ₹{target}\nSL: ₹{stop_loss}\nReason: Market Overbought.")
                 else:
                     if trade["type"] == "BUY":
                         if price >= trade["target"]:
                             send_telegram(f"🎯 <b>TARGET HIT!</b>\nStock: {stock}\nProfit booked at ₹{price} (Target was ₹{trade['target']}).")
-                            active_trades[stock] = None 
-                            memory_changed = True
+                            with memory_lock: active_trades[stock] = None 
                         elif price <= trade["sl"]:
                             send_telegram(f"🛡️ <b>STOP LOSS HIT</b>\nStock: {stock}\nExited at ₹{price} to prevent big losses.")
-                            active_trades[stock] = None
-                            memory_changed = True
+                            with memory_lock: active_trades[stock] = None
                             
                     elif trade["type"] == "SELL":
                         if price <= trade["target"]:
                             send_telegram(f"🎯 <b>TARGET HIT!</b>\nStock: {stock}\nProfit booked at ₹{price} (Target was ₹{trade['target']}).")
-                            active_trades[stock] = None
-                            memory_changed = True
+                            with memory_lock: active_trades[stock] = None
                         elif price >= trade["sl"]:
                             send_telegram(f"🛡️ <b>STOP LOSS HIT</b>\nStock: {stock}\nExited at ₹{price} to prevent big losses.")
-                            active_trades[stock] = None
-                            memory_changed = True
+                            with memory_lock: active_trades[stock] = None
                             
-            if memory_changed:
-                save_memory(active_trades)
         except: pass
         time.sleep(60) 
 
 threading.Thread(target=telegram_tracker, daemon=True).start()
 
-# ⚡ FIXED: Added Main Route for UptimeRobot
+# ==========================================
+# FRONTEND API ROUTE
+# ==========================================
 @app.route('/')
 def home():
     return "Server is Awake and Running Perfectly!"
 
 @app.route('/get_best_trades')
 def get_best_trades():
+    global active_trades
     mode = request.args.get('mode', 'intraday') 
     trades_data = []
-    
-    active_trades = load_memory()
     
     for stock in STOCKS:
         try:
@@ -142,7 +128,8 @@ def get_best_trades():
             elif rsi > 70: trend_score -= 30
             trend_score = min(max(int(trend_score), 0), 100) 
 
-            trade = active_trades.get(stock)
+            with memory_lock: # ⚡ UI-কে ডাটা দেওয়ার সময় লক করা হলো
+                trade = active_trades[stock]
             
             if trade:
                 signal = f"ACTIVE {trade['type']} 🟢" if trade['type'] == 'BUY' else f"ACTIVE SELL 🔴"
@@ -191,4 +178,5 @@ def get_best_trades():
     return jsonify({"status": "success", "data": trades_data})
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    # ⚡ Use threaded=False to ensure single memory space
+    app.run(host='0.0.0.0', port=5000, threaded=False) 

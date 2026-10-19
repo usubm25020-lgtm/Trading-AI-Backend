@@ -10,9 +10,6 @@ import time
 app = Flask(__name__)
 CORS(app)
 
-# ==========================================
-# TELEGRAM SETTINGS
-# ==========================================
 TELEGRAM_TOKEN = "8223149909:AAE8hQlu-coYVlrdd5v810D4HcOmPiZBOP8"
 CHAT_ID = "7188544429"
 
@@ -28,13 +25,13 @@ def send_telegram_alert(message):
         pass
 
 def calculate_advanced_indicators(df):
+    df['EMA_20'] = df['close'].ewm(span=20, adjust=False).mean()
     df['EMA_50'] = df['close'].ewm(span=50, adjust=False).mean()
-    df['EMA_200'] = df['close'].ewm(span=200, adjust=False).mean()
     delta = df['close'].diff()
     gain = delta.where(delta > 0, 0)
     loss = -delta.where(delta < 0, 0)
-    avg_gain = gain.ewm(com=13, adjust=False).mean()
-    avg_loss = loss.ewm(com=13, adjust=False).mean()
+    avg_gain = gain.ewm(com=14, adjust=False).mean()
+    avg_loss = loss.ewm(com=14, adjust=False).mean()
     rs = avg_gain / avg_loss
     df['RSI'] = 100 - (100 / (1 + rs))
     
@@ -53,8 +50,8 @@ def calculate_advanced_indicators(df):
 
 def get_market_data(stock):
     headers = {'User-Agent': 'Mozilla/5.0'}
-    # ⚡ MAGIC CHANGE: 1d এর বদলে 15m (15 Minute) এবং range 5d করা হয়েছে Intraday এর জন্য
-    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{stock}?interval=15m&range=5d"
+    # ⚡ MAGIC CHANGE: 1m (1 Minute) interval for ULTRAFAST Live Data
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{stock}?interval=1m&range=1d"
     res = requests.get(url, headers=headers).json()
     quote = res['chart']['result'][0]['indicators']['quote'][0]
     timestamps = res['chart']['result'][0]['timestamp']
@@ -68,10 +65,10 @@ def get_market_data(stock):
     return calculate_advanced_indicators(df)
 
 # ==========================================
-# BACKGROUND SCANNER ROBOT
+# ULTRAFAST BACKGROUND SCANNER (Every 2 Mins)
 # ==========================================
 def background_scanner():
-    send_telegram_alert("✅ System Live: FAST INTRADAY Scanner is now running!")
+    send_telegram_alert("✅ System Live: ULTRAFAST Scalping Mode (1-Min TF) is running!")
     
     while True:
         try:
@@ -84,18 +81,18 @@ def background_scanner():
                 atr = round(latest['ATR'], 2)
                 
                 message = ""
-                # Intraday Fast Signals
+                # Fast Scalping Logic
                 if rsi < 35 and latest['MACD'] > latest['Signal_Line']:
-                    target = round(current_price + (atr * 3), 2)
-                    stop_loss = round(current_price - (atr * 1.5), 2)
-                    message = f"🚀 <b>INTRADAY BUY ALERT</b>\nStock: {stock}\nPrice: ₹{current_price}\nRSI: {rsi}\nTarget: ₹{target}\nStop Loss: ₹{stop_loss}\n⏱️ TF: 15 Mins"
+                    target = round(current_price + (atr * 2), 2)
+                    message = f"🚀 <b>BUY NOW</b>\nStock: {stock}\nPrice: ₹{current_price}\nRSI: {rsi}\nTarget: ₹{target}\n⏱️ Action: Buy within 5 Mins"
                 
-                elif rsi > 75:
-                    message = f"⚠️ <b>INTRADAY SELL ALERT</b>\nStock: {stock}\nPrice: ₹{current_price}\nMarket Overbought. Take Profit/Short!"
+                elif rsi > 75 and latest['MACD'] < latest['Signal_Line']:
+                    target = round(current_price - (atr * 2), 2)
+                    message = f"⚠️ <b>SELL NOW</b>\nStock: {stock}\nPrice: ₹{current_price}\nRSI: {rsi}\nTarget: ₹{target}\n⏱️ Action: Sell within 5 Mins"
                 
-                # Spam Protection: প্রতি ঘণ্টায় একবারের বেশি একই মেসেজ পাঠাবে না
-                today_hour = datetime.now().strftime("%Y-%m-%d_%H")
-                alert_key = f"{stock}_{today_hour}_{'BUY' if 'BUY' in message else 'SELL'}"
+                # Spam Protection: প্রতি ১০ মিনিটে একবারের বেশি পাঠাবে না (যাতে ফাস্ট মুভমেন্ট মিস না হয়, আবার স্প্যামও না হয়)
+                current_min = datetime.now().minute // 10
+                alert_key = f"{stock}_{current_min}_{'BUY' if 'BUY' in message else 'SELL'}"
                 
                 if message and (alert_key not in last_alert):
                     send_telegram_alert(message)
@@ -104,16 +101,13 @@ def background_scanner():
         except Exception as e:
             pass
             
-        time.sleep(900) 
+        time.sleep(120) # ⚡ Checks every 2 Minutes!
 
 threading.Thread(target=background_scanner, daemon=True).start()
 
-# ==========================================
-# MAIN ROUTES
-# ==========================================
 @app.route('/')
 def home():
-    return "Server is Awake and Running Intraday Mode!"
+    return "Server is Awake in Ultrafast Scalping Mode!"
 
 @app.route('/get_best_trades')
 def get_best_trades():
@@ -130,50 +124,50 @@ def get_best_trades():
             change_percent = round(((current_price - prev['close']) / prev['close']) * 100, 2)
             
             volatility_percent = (atr / current_price) * 100
-            if volatility_percent > 1.5: # Adjusted for 15m timeframe
+            if volatility_percent > 0.5: 
                 market_condition = "High Momentum 🌪️"
                 vol_color = "#0ecb81"
-            elif volatility_percent < 0.3:
-                market_condition = "Dead / Boring Market 😴"
+            elif volatility_percent < 0.1:
+                market_condition = "Dead Market 😴"
                 vol_color = "#848e9c"
             else:
-                market_condition = "Perfect for Intraday 🎯"
+                market_condition = "Perfect for Scalping 🎯"
                 vol_color = "#0ecb81"
                 
             sentiment = "Extreme Greed 🤑" if rsi > 75 else ("Extreme Fear 😨" if rsi < 25 else "Neutral ⚖️")
             
             signal = "WAIT / HOLD 🟡"
             confidence = 0
-            trend = "Bullish 📈" if latest['EMA_50'] > latest['EMA_200'] else "Bearish 📉"
+            trend = "Bullish 📈" if latest['EMA_20'] > latest['EMA_50'] else "Bearish 📉"
             
-            if trend == "Bullish 📈" and rsi < 60 and latest['MACD'] > latest['Signal_Line']:
-                signal = "BUY 🟢"
-                confidence = 70
+            if trend == "Bullish 📈" and rsi < 65 and latest['MACD'] > latest['Signal_Line']:
+                signal = "BUY NOW 🟢"
+                confidence = 75
                 if rsi < 40: 
                     signal = "STRONG BUY 🚀"
-                    confidence = 90
-            elif trend == "Bearish 📉" and rsi > 40 and latest['MACD'] < latest['Signal_Line']:
-                signal = "SELL 🔴"
-                confidence = 70
+                    confidence = 95
+            elif trend == "Bearish 📉" and rsi > 35 and latest['MACD'] < latest['Signal_Line']:
+                signal = "SELL NOW 🔴"
+                confidence = 75
                 if rsi > 70:
                     signal = "STRONG SELL 💥"
-                    confidence = 90
+                    confidence = 95
                     
             if "BUY" in signal or "SELL" in signal:
                 stop_loss_distance = atr * 1.5
-                target_distance = stop_loss_distance * 2 
+                target_distance = atr * 2.5 
                 target = round(current_price + target_distance, 2) if "BUY" in signal else round(current_price - target_distance, 2)
                 stop_loss = round(current_price - stop_loss_distance, 2) if "BUY" in signal else round(current_price + stop_loss_distance, 2)
                 
-                # ⚡ Timeframe text changed for Intraday
-                expected_candles = max(1, round(target_distance / atr))
-                timeframe = f"Intraday ({expected_candles} to {expected_candles + 4} Candles) ⏳"
-                action_text = f"Intraday Buy at ₹{current_price}." if "BUY" in signal else "Intraday Sell/Short."
+                # ⚡ Candles এর বদলে Time
+                expected_mins = max(5, round(target_distance / atr))
+                timeframe = f"Expected in {expected_mins} to {expected_mins + 10} Mins ⏳"
+                action_text = f"Buy now at ₹{current_price} for fast profit." if "BUY" in signal else "Sell/Short now immediately."
             else:
                 target = "--"
                 stop_loss = "--"
-                timeframe = "N/A"
-                action_text = "Wait for 15m candle breakout."
+                timeframe = "Wait for next move"
+                action_text = "Market stabilizing. Wait for signal."
                 
             trades.append({
                 "stock": stock.replace(".NS", ""),
